@@ -117,20 +117,79 @@ Reproduce → Isolate → Root Cause(5 Why) → Fix(最小修改) → Verify
 
 # 项目概述
 
-本项目旨在构建一个自定义的MCP（Model Context Protocol）服务器，嵌入Unity编辑器，使AI客户端（Claude Code）能够通过标准化的工具调用直接操控Unity编辑器。最终目标是实现对Odin技能编辑器的AI驱动创作，当前阶段先实现基础物体创建等原子能力。
+本项目构建一个嵌入 Unity 编辑器的 MCP（Model Context Protocol）服务器，使 AI 客户端（Claude Code）能够通过标准化工具调用直接操控 Unity 编辑器。最终目标为实现 Odin 技能编辑器的 AI 驱动创作。
 
 ## 技术架构
-- **通信协议**：MCP JSON-RPC 2.0 over HTTP  
-- **服务器实现**：纯 C#，在 Unity 编辑器中开发一个编辑器拓展窗口，监听 HTTP 请求并调用对应工具函数，运行自定义监听IP（默认 `localhost:9100`）
-- **线程调度**：所有 Unity API 调用通过 `EditorApplication.delayCall` 安全投递到主线程执行  
-- **依赖**：零第三方包，仅使用 .NET Standard 2.1 内置库与 Unity Editor API  
+
+- **通信协议**：MCP JSON-RPC 2.0 over HTTP，`HttpListener` 异步回调链（`BeginGetContext` / `EndGetContext`）
+- **客户端配置**：`.mcp.json` 声明 HTTP 类型 MCP 服务器，Claude Code 启动时自动连接 `localhost:9100`
+- **服务器实现**：纯 C# 编辑器扩展，零第三方依赖，仅 .NET Standard 2.1 + Unity Editor API
+- **线程调度**：HTTP 请求在 ThreadPool 线程处理 → `ManualResetEventSlim` 阻塞等待 → `EditorApplication.delayCall` 将闭包投递到 Unity 主线程 → 执行 Unity API → 结果返回 HTTP 响应
+- **工具扩展模型**：`IMcpTool` 接口定义契约 → `McpToolRegistry.RegisterAll()` 显式注册 → 新增工具只需一个文件 + 一行 `Register()`
+
+## 文件结构
+
+```
+Assets/Editor/
+├── McpServer.cs              ← HTTP 生命周期 + JSON-RPC 路由 + MCP 方法处理 + 响应构建
+├── McpServerWindow.cs        ← EditorWindow 控制台 UI（启停按钮、IP 配置、日志面板）
+├── McpJson.cs                ← 递归下降 JSON 解析器 + StringBuilder 序列化器
+├── IMcpTool.cs               ← 工具接口：Name / Description / InputSchema / Execute
+├── McpToolRegistry.cs        ← 工具注册表（显式注册、查找、防重复注册）
+├── McpMainThread.cs          ← 主线程调度器（泛型 Invoke<T>，30s 超时）
+└── Tools/
+    └── CreateGameObjectTool.cs ← 工具：在场景中创建基元体（Sphere/Cube/Capsule/…）
+```
+
+### 各文件职责与依赖
+
+| 文件 | 职责 | 约行数 | 编译依赖 |
+|------|------|--------|----------|
+| `McpJson.cs` | JSON 解析与序列化 | 250 | 无 |
+| `IMcpTool.cs` | 工具接口契约（4 个成员） | 20 | 无 |
+| `McpMainThread.cs` | 将闭包安全投递到 Unity 主线程并阻塞返回结果 | 30 | `UnityEditor` |
+| `McpToolRegistry.cs` | 管理已注册工具列表、按名称查找、一次性注册 | 45 | `IMcpTool` |
+| `Tools/CreateGameObjectTool.cs` | 解析参数 → `GameObject.CreatePrimitive` → 设置名称/位置 → 选中并 Ping | 70 | `IMcpTool`, Unity API |
+| `McpServer.cs` | HTTP 生命周期 + JSON-RPC 路由（`initialize`/`tools/list`/`tools/call`/`notifications/initialized`）+ 响应构建 | 265 | 以上全部 |
+| `McpServerWindow.cs` | EditorWindow 控制台 UI，订阅 `SimpleMcpServer.OnLog`，EditorPrefs 持久化 IP/端口 | 137 | `McpServer` |
+
+> **兼容性说明**：`McpServer.cs` 中类名保持 `SimpleMcpServer`（C# 不要求文件名 = 类名），`McpServerWindow.cs` 无需任何修改。
+
+### 新增工具流程
+
+1. 在 `Assets/Editor/Tools/` 新建 `MyTool.cs`，实现 `IMcpTool` 接口的 4 个成员
+2. 在 `McpToolRegistry.RegisterAll()` 中加一行 `Register(new MyTool());`
+3. 完成。无需修改 `McpServer.cs`，服务器自动发现该工具
+
+## MCP 连接生命周期
+
+```
+Claude Code 启动
+  → 读取 .mcp.json → 连接 http://localhost:9100
+  → initialize (握手，交换协议版本与能力声明)
+  → notifications/initialized (JSON-RPC notification，无 id 字段，HTTP 204，无响应体)
+  → tools/list (获取工具列表及每个工具的 InputSchema)
+  ── 以上为连接阶段，仅执行一次 ──
+  → tools/call (按需调用，每次携带 tool name + arguments，返回 content 数组)
+```
 
 ## 当前状态
-- [ ] MCP 基础框架：`initialize`, `tools/list`, `tools/call`  
-- [ ] 工具 `create_gameobject`：在场景中创建指定基元体，支持位置与名称  
-- [ ] 多工具扩展（技能数据操作、组件管理）  
-- [ ] 与 Odin 技能编辑器窗口联动  
+
+- [x] MCP 基础框架：`initialize`、`tools/list`、`tools/call`、`notifications/initialized`
+- [x] 工具架构：`IMcpTool` 接口 + `McpToolRegistry` 显式注册 + `McpMainThread` 线程调度
+- [x] 工具 `create_gameobject`：在场景中创建指定基元体，支持类型/名称/位置参数
+- [x] EditorWindow 控制台：手动启停 + IP/端口配置持久化（EditorPrefs）+ 实时日志面板
+- [ ] 多工具扩展（技能数据操作、组件管理等）
+- [ ] 与 Odin 技能编辑器窗口联动
 
 ## 关键文件
-- `.mcp.json` — Claude Code 客户端连接配置
+
+- `.mcp.json` — Claude Code 客户端 MCP 连接配置（type: http, url: localhost:9100）
+- `Assets/Editor/McpServer.cs` — 服务器核心，类名 `SimpleMcpServer`，对外暴露 `Start`/`Stop`/`IsRunning`/`OnLog`
+- `Assets/Editor/McpServerWindow.cs` — Unity 编辑器窗口，菜单入口 `UnityMCP Server/打开MCP Server窗口`
+- `Assets/Editor/IMcpTool.cs` — 工具接口，所有工具必须实现
+- `Assets/Editor/McpToolRegistry.cs` — 工具注册表，新增工具在此登记
+- `Assets/Editor/McpMainThread.cs` — 主线程调度器，HTTP 线程与 Unity 主线程之间的桥梁
+- `Assets/Editor/McpJson.cs` — 零依赖 JSON 解析/序列化
+- `Assets/Editor/Tools/CreateGameObjectTool.cs` — 当前唯一工具实现
 - `Assets/_SkillEditor/…` — 后续技能编辑器工具集与数据模型（规划中）

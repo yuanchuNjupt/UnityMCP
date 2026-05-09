@@ -19,6 +19,9 @@
 .idea/
 .utmp/
 
+# Claude Code 本地配置
+.claude/settings.local.json
+
 # 系统文件
 .DS_Store
 Thumbs.db
