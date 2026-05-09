@@ -383,15 +383,23 @@ internal static class SimpleMcpServer
             responseJson = BuildErrorResponse(null, -32603, $"Internal error: {ex.Message}");
         }
 
-        byte[] buffer = Encoding.UTF8.GetBytes(responseJson);
-        try
+        if (responseJson != null)
         {
-            ctx.Response.ContentType = "application/json; charset=utf-8";
-            ctx.Response.ContentLength64 = buffer.Length;
-            ctx.Response.OutputStream.Write(buffer, 0, buffer.Length);
-            ctx.Response.OutputStream.Close();
+            byte[] buffer = Encoding.UTF8.GetBytes(responseJson);
+            try
+            {
+                ctx.Response.ContentType = "application/json; charset=utf-8";
+                ctx.Response.ContentLength64 = buffer.Length;
+                ctx.Response.OutputStream.Write(buffer, 0, buffer.Length);
+                ctx.Response.OutputStream.Close();
+            }
+            catch { /* 响应流可能已关闭 */ }
         }
-        catch { /* 响应流可能已关闭 */ }
+        else
+        {
+            ctx.Response.StatusCode = 204; // No Content (notification)
+            try { ctx.Response.OutputStream.Close(); } catch { }
+        }
 
         BeginGetContext(); // 继续监听
     }
@@ -436,6 +444,9 @@ internal static class SimpleMcpServer
                 case "tools/call":
                     Log($"收到 tools/call 请求");
                     return BuildResponse(idObj, HandleToolsCall(request));
+                case "notifications/initialized":
+                    Log("收到 notifications/initialized");
+                    return null; // JSON-RPC notification，无需回复
                 default:
                     Log($"未知方法: {method}");
                     return BuildErrorResponse(idObj, -32601, $"Method not found: {method}");
