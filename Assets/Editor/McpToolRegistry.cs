@@ -39,7 +39,13 @@ internal static class McpToolRegistry
         _registered = true;
 
         Register(new CreateGameObjectTool());
-        // 在此添加新工具:
-        // Register(new MyNewTool());
+        Register(new GetSceneGameObjectsTool());
+        Register(new GetGameObjectInfoTool());
+        Register(new GetComponentPropertiesTool());
+        Register(new SetComponentPropertyTool());
+        Register(new SetComponentPropertiesTool());
+        Register(new AddComponentTool());
+        Register(new RemoveComponentTool());
+        Register(new SaveSceneTool());
     }
 }

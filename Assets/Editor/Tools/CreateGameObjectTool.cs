@@ -11,8 +11,8 @@ internal class CreateGameObjectTool : IMcpTool
     public string Name => "create_gameobject";
 
     public string Description =>
-        "Create a primitive GameObject in the current scene. " +
-        "Supported types: Sphere, Cube, Capsule, Cylinder, Plane, Quad.";
+        "在当前场景中创建基础 GameObject（Sphere/Cube/Capsule/Cylinder/Plane/Quad）。" +
+        "返回新物体的 InstanceID 及所有组件的 InstanceID，可直接用于后续操作。";
 
     public Dictionary<string, object> InputSchema => new Dictionary<string, object>
     {
@@ -22,18 +22,18 @@ internal class CreateGameObjectTool : IMcpTool
             ["primitive_type"] = new Dictionary<string, object>
             {
                 ["type"] = "string",
-                ["description"] = "Type of primitive mesh",
+                ["description"] = "基础网格类型",
                 ["enum"] = new List<object> { "Sphere", "Cube", "Capsule", "Cylinder", "Plane", "Quad" }
             },
             ["name"] = new Dictionary<string, object>
             {
                 ["type"] = "string",
-                ["description"] = "Name for the new GameObject (defaults to the primitive type name)"
+                ["description"] = "新 GameObject 的名称（默认与类型同名）"
             },
             ["position"] = new Dictionary<string, object>
             {
                 ["type"] = "array",
-                ["description"] = "World position [x, y, z], defaults to (0, 0, 0)",
+                ["description"] = "世界坐标 [x, y, z]，默认为 (0, 0, 0)",
                 ["items"] = new Dictionary<string, object> { ["type"] = "number" }
             }
         }
@@ -65,6 +65,31 @@ internal class CreateGameObjectTool : IMcpTool
         Selection.activeGameObject = go;
         EditorGUIUtility.PingObject(go);
 
-        return $"Created {primitiveType} '{goName}' at ({x:F2}, {y:F2}, {z:F2})";
+        // 收集所有组件的 InstanceID，方便 Agent 直接使用
+        Component[] components = go.GetComponents<Component>();
+        var compList = new List<object>();
+        for (int i = 0; i < components.Length; i++)
+        {
+            Component c = components[i];
+            if (c == null) continue;
+            compList.Add(new Dictionary<string, object>
+            {
+                ["instance_id"] = c.GetInstanceID(),
+                ["type_name"] = c.GetType().Name
+            });
+        }
+
+        return McpJson.Stringify(new Dictionary<string, object>
+        {
+            ["success"] = true,
+            ["data"] = new Dictionary<string, object>
+            {
+                ["instance_id"] = go.GetInstanceID(),
+                ["name"] = goName,
+                ["type"] = primitiveType,
+                ["position"] = new List<object> { (double)x, (double)y, (double)z },
+                ["components"] = compList
+            }
+        });
     }
 }
