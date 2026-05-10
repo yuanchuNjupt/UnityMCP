@@ -4,7 +4,6 @@
 /[Oo]bj/
 /[Ll]ogs/
 /[Uu]ser[Ss]ettings/
-/[Pp]roject[Ss]ettings/
 
 # 构建输出
 /[Bb]uild/
@@ -19,8 +18,6 @@
 .idea/
 .utmp/
 
-# Claude Code 本地配置
-.claude/settings.local.json
 
 # 系统文件
 .DS_Store
